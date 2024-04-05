@@ -23,7 +23,6 @@
 
 # detect operating system
 UNAME ?= $(shell uname -s)
-MACHINE ?= $(shell uname -m)
 OS := NONE
 ifeq ("$(UNAME)","Linux")
   OS = LINUX
@@ -55,7 +54,6 @@ ifeq ("$(UNAME)","OpenBSD")
   OS = FREEBSD
   SO_EXTENSION = so
   SHARED = -shared
-  $(warning OS type "$(UNAME)" not officially supported.')
 endif
 ifneq ("$(filter GNU/kFreeBSD kfreebsd,$(UNAME))","")
   OS = LINUX
@@ -69,7 +67,7 @@ ifeq ("$(patsubst MINGW%,MINGW,$(UNAME))","MINGW")
   PIC = 0
 endif
 ifeq ("$(OS)","NONE")
-  $(error OS type "$(UNAME)" not supported.  Please file bug report at 'http://code.google.com/p/mupen64plus/issues')
+  $(error OS type "$(UNAME)" not supported.  Please file bug report at 'https://github.com/mupen64plus/mupen64plus-core/issues')
 endif
 
 # detect system architecture
@@ -144,19 +142,11 @@ SRCDIR = ../../src
 OBJDIR = _obj$(POSTFIX)
 
 # base CFLAGS, LDLIBS, and LDFLAGS
-OPTFLAGS ?= -flto
+OPTFLAGS ?= -O3 -flto
 WARNFLAGS ?= -Wall
-CFLAGS += $(OPTFLAGS) $(WARNFLAGS) -ffast-math -fno-strict-aliasing -fvisibility=hidden -I../../src -DSDL_VIDEO_OPENGL_ES2=1 -DSDL_VIDEO_OPENGL=0 -I$(SRCDIR)
-CXXFLAGS += -fvisibility-inlines-hidden -DSDL_VIDEO_OPENGL_ES2=1 -DSDL_VIDEO_OPENGL=0
+CFLAGS += $(OPTFLAGS) $(WARNFLAGS) -ffast-math -fno-strict-aliasing -fvisibility=hidden -I$(SRCDIR)
+CXXFLAGS += -fvisibility-inlines-hidden
 LDFLAGS += $(SHARED)
-
-ifeq ($(VC), 1)
-  CFLAGS += -DARM -I/opt/vc/include -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux -DVC
-  CXXFLAGS += -I/opt/vc/include -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux -DVC
-  LDLIBS += -lm -L/opt/vc/lib -lEGL -lbcm_host
-endif
-
-LDLIBS += -lGLESv2
 
 ifeq ($(CPU), X86)
   CFLAGS += -msse
@@ -179,8 +169,20 @@ ifeq ($(ARCH_DETECTED), 64BITS_32)
   ifeq ($(OS), FREEBSD)
     $(error Do not use the BITS=32 option with FreeBSD, use -m32 and -m elf_i386)
   endif
-  CFLAGS += -m32
-  LDFLAGS += -Wl,-m,elf_i386
+  ifneq ($(OS), OSX)
+    ifeq ($(OS), MINGW)
+      LDFLAGS += -Wl,-m,i386pe
+    else
+      CFLAGS += -m32
+      LDFLAGS += -Wl,-m,elf_i386
+    endif
+  endif
+endif
+
+ifeq ($(ARCH_DETECTED), 64BITS)
+  ifeq ($(OS), MINGW)
+    LDFLAGS += -Wl,-m,i386pep
+  endif
 endif
 
 # set special flags per-system
@@ -190,25 +192,15 @@ ifeq ($(OS), LINUX)
   LDFLAGS += -Wl,-version-script,$(SRCDIR)/video_api_export.ver
 endif
 ifeq ($(OS), OSX)
-  # Select the proper SDK
-  # Also, SDKs are stored in a different location since XCode 4.3
-  OSX_SDK ?= $(shell sw_vers -productVersion | cut -f1 -f2 -d .)
-  OSX_XCODEMAJ = $(shell xcodebuild -version | grep '[0-9]*\.[0-9]*' | cut -f2 -d ' ' | cut -f1 -d .)
-  OSX_XCODEMIN = $(shell xcodebuild -version | grep '[0-9]*\.[0-9]*' | cut -f2 -d ' ' | cut -f2 -d .)
-  OSX_XCODEGE43 = $(shell echo "`expr $(OSX_XCODEMAJ) \>= 4``expr $(OSX_XCODEMIN) \>= 3`")
-  ifeq ($(OSX_XCODEGE43), 11)
-    OSX_SYSROOT := /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs
-  else
-    OSX_SYSROOT := /Developer/SDKs
-  endif
+  OSX_SDK_PATH = $(shell xcrun --sdk macosx --show-sdk-path)
 
   ifeq ($(CPU), X86)
     ifeq ($(ARCH_DETECTED), 64BITS)
-      CFLAGS += -pipe -arch x86_64 -mmacosx-version-min=$(OSX_SDK) -isysroot $(OSX_SYSROOT)/MacOSX$(OSX_SDK).sdk
+      CFLAGS += -pipe -arch x86_64 -mmacosx-version-min=10.9 -isysroot $(OSX_SDK_PATH) -stdlib=libc++
       LDFLAGS += -bundle
       LDLIBS += -ldl
     else
-      CFLAGS += -pipe -mmmx -msse -fomit-frame-pointer -arch i686 -mmacosx-version-min=$(OSX_SDK) -isysroot $(OSX_SYSROOT)/MacOSX$(OSX_SDK).sdk
+      CFLAGS += -pipe -mmmx -msse -fomit-frame-pointer -arch i686 -mmacosx-version-min=10.6 -isysroot $(OSX_SDK_PATH)
       LDFLAGS += -bundle
       LDLIBS += -ldl
     endif
@@ -234,6 +226,15 @@ CFLAGS += $(LIBPNG_CFLAGS)
 LDLIBS += $(LIBPNG_LDLIBS)
 
 # search for OpenGL libraries
+ifeq ($(VC), 1)
+  GL_CFLAGS += -I/opt/vc/include -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/vmcs_host/linux
+  GL_LDLIBS += -L/opt/vc/lib -lEGL -lbcm_host -lvcos -lvchiq_arm
+  USE_GLES=1
+endif
+ifeq ($(USE_GLES), 1)
+  CFLAGS += -DUSE_GLES
+  GL_LDLIBS += -lGLESv2
+endif
 ifeq ($(OS), OSX)
   GL_LDLIBS = -framework OpenGL
 endif
@@ -310,11 +311,9 @@ LINK.o = $(Q_LD)$(CXX) $(CXXFLAGS) $(LDFLAGS) $(TARGET_ARCH)
 
 # set special flags for given Makefile parameters
 ifeq ($(DEBUG),1)
-  #CFLAGS += -g
-	CFLAGS+= -DOPENGL_DEBUG -DTIME_PROFILE
+  CFLAGS += -g
   INSTALL_STRIP_FLAG ?= 
 else
-  CFLAGS += -O3 #-DTIME_PROFILE
   ifneq ($(OS),OSX)
     INSTALL_STRIP_FLAG ?= -s
   endif
@@ -336,10 +335,6 @@ endif
 ifeq ($(PLUGINDIR),)
   PLUGINDIR := $(LIBDIR)/mupen64plus
 endif
-
-SRCDIR = ../../src
-OBJDIR = _obj$(POSTFIX)
-
 # list of source files to compile
 SOURCE = \
 	$(SRCDIR)/liblinux/BMGImage.c \
@@ -419,9 +414,10 @@ targets:
 	@echo "  Options:"
 	@echo "    BITS=32       == build 32-bit binaries on 64-bit machine"
 	@echo "    NO_ASM=1      == build without inline assembly code (x86 MMX/SSE)"
+	@echo "    USE_GLES=1    == build against GLESv2 instead of OpenGL"
+	@echo "    VC=1          == build against Broadcom Videocore GLESv2"
 	@echo "    APIDIR=path   == path to find Mupen64Plus Core headers"
 	@echo "    OPTFLAGS=flag == compiler optimization (default: -O3 -flto)"
-	@echo "    VC=1 	 == build against Broadcom Videocore GLESv2"
 	@echo "    WARNFLAGS=flag == compiler warning levels (default: -Wall)"
 	@echo "    PIC=(1|0)     == Force enable/disable of position independent code"
 	@echo "    POSTFIX=name  == String added to the name of the the build (default: '')"
@@ -441,7 +437,7 @@ install: $(TARGET)
 	$(INSTALL) -d "$(DESTDIR)$(PLUGINDIR)"
 	$(INSTALL) -m 0644 $(INSTALL_STRIP_FLAG) $(TARGET) "$(DESTDIR)$(PLUGINDIR)"
 	$(INSTALL) -d "$(DESTDIR)$(SHAREDIR)"
-	$(INSTALL) -m 0644 "../../data/RiceVideoLinux.ini" "$(DESTDIR)$(SHAREDIR)"
+	$(INSTALL) -m 0644 "$(SRCDIR)/../data/RiceVideoLinux.ini" "$(DESTDIR)$(SHAREDIR)"
 
 uninstall:
 	$(RM) "$(DESTDIR)$(PLUGINDIR)/$(TARGET)"
@@ -453,7 +449,7 @@ clean:
 rebuild: clean all
 
 # build dependency files
-CFLAGS += -MD
+CFLAGS += -MD -MP
 -include $(OBJECTS:.o=.d)
 
 CXXFLAGS += $(CFLAGS)
@@ -464,8 +460,3 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.cpp
 	$(COMPILE.cc) -o $@ $<
-
-$(TARGET): $(OBJECTS)
-	$(LINK.o) $^ $(LOADLIBES) $(LDLIBS) -o $@ 
-
-.PHONY: all clean install uninstall targets
