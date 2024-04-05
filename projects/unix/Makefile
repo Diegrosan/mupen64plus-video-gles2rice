@@ -106,22 +106,47 @@ ifneq ("$(filter ppc64 powerpc64,$(HOST_CPU))","")
   NO_ASM := 1
   $(warning Architecture "$(HOST_CPU)" not officially supported.')
 endif
+ifneq ("$(filter ppc64le powerpc64le,$(HOST_CPU))","")
+  CPU := PPC
+  ARCH_DETECTED := 64BITS
+  BIG_ENDIAN := 0
+  PIC ?= 1
+  NO_ASM := 1
+  $(warning Architecture "$(HOST_CPU)" not officially supported.')
+endif
 ifneq ("$(filter arm%,$(HOST_CPU))","")
   ifeq ("$(filter arm%b,$(HOST_CPU))","")
     CPU := ARM
     ARCH_DETECTED := 32BITS
     PIC ?= 1
+    NO_ASM := 1
     $(warning Architecture "$(HOST_CPU)" not officially supported.')
   endif
 endif
-ifeq ("$(CPU)","NONE")
-  $(error CPU type "$(HOST_CPU)" not supported.  Please file bug report at 'http://code.google.com/p/mupen64plus/issues')
+ifneq ("$(filter aarch64,$(HOST_CPU))","")
+    CPU := AARCH
+    ARCH_DETECTED := 64BITS
+    PIC ?= 1
+    NO_ASM := 1
 endif
+ifneq ("$(filter riscv64,$(HOST_CPU))","")
+    CPU := RISCV64
+    ARCH_DETECTED := 64BITS
+    PIC ?= 1
+    NO_ASM := 1
+    $(warning Architecture "$(HOST_CPU)" not officially supported.)
+endif
+ifeq ("$(CPU)","NONE")
+  $(error CPU type "$(HOST_CPU)" not supported.  Please file bug report at 'https://github.com/mupen64plus/mupen64plus-core/issues')
+endif
+
+SRCDIR = ../../src
+OBJDIR = _obj$(POSTFIX)
 
 # base CFLAGS, LDLIBS, and LDFLAGS
 OPTFLAGS ?= -flto
 WARNFLAGS ?= -Wall
-CFLAGS += $(OPTFLAGS) $(WARNFLAGS) -ffast-math -fno-strict-aliasing -fvisibility=hidden -I../../src -DSDL_VIDEO_OPENGL_ES2=1 -DSDL_VIDEO_OPENGL=0
+CFLAGS += $(OPTFLAGS) $(WARNFLAGS) -ffast-math -fno-strict-aliasing -fvisibility=hidden -I../../src -DSDL_VIDEO_OPENGL_ES2=1 -DSDL_VIDEO_OPENGL=0 -I$(SRCDIR)
 CXXFLAGS += -fvisibility-inlines-hidden -DSDL_VIDEO_OPENGL_ES2=1 -DSDL_VIDEO_OPENGL=0
 LDFLAGS += $(SHARED)
 
